@@ -2,74 +2,118 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f7fb;
+  --foreground: #0f172a;
+  --surface: rgba(255, 255, 255, 0.75);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --border-light: rgba(148, 163, 184, 0.35);
+  --border-dark: rgba(15, 23, 42, 0.12);
+  --accent: #5d5fef;
+  --muted: #64748b;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-inter-mono);
 }
 
 body {
-  background: var(--background);
+  background: radial-gradient(circle at top, #fdfdff 0%, #f6f7fb 45%, #eef1f7 100%);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-.status-pulse {
-  position: absolute;
-  height: 20px;
-  width: 20px;
-  border-radius: 9999px;
-  background: rgba(15, 23, 42, 0.08);
-  animation: status-pulse 1.6s ease-in-out infinite;
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
 }
 
 .status-orb {
-  height: 12px;
-  width: 12px;
+  height: 18px;
+  width: 18px;
   border-radius: 9999px;
   background: conic-gradient(
-    from 90deg,
-    rgba(56, 189, 248, 0.9),
-    rgba(129, 140, 248, 0.9),
-    rgba(16, 185, 129, 0.9),
-    rgba(56, 189, 248, 0.9)
+    from 120deg,
+    rgba(93, 95, 239, 0.95),
+    rgba(0, 255, 163, 0.9),
+    rgba(93, 95, 239, 0.95)
   );
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
-  animation: status-spin 2s linear infinite;
+  box-shadow: 0 0 16px rgba(93, 95, 239, 0.35);
+  animation: status-spin 1.6s linear infinite;
+}
+
+.status-ring {
+  position: absolute;
+  height: 28px;
+  width: 28px;
+  border-radius: 9999px;
+  border: 1px solid rgba(93, 95, 239, 0.2);
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+
+.status-pill {
+  background: var(--surface);
+  border: 0.5px solid var(--border-light);
+  backdrop-filter: blur(12px);
+}
+
+.progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 0.5px;
+  width: 100%;
+  background: linear-gradient(90deg, rgba(93, 95, 239, 0), rgba(93, 95, 239, 0.8), rgba(93, 95, 239, 0));
+  animation: progress-slide 1.8s ease-in-out infinite;
+}
+
+.ghost-card {
+  background: linear-gradient(120deg, rgba(226, 232, 240, 0.4), rgba(248, 250, 252, 0.8), rgba(226, 232, 240, 0.4));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
 }
 
 @keyframes status-spin {
   0% {
-    transform: rotate(0deg) scale(1);
+    transform: rotate(0deg) scale(0.95);
   }
   50% {
     transform: rotate(180deg) scale(1.05);
   }
   100% {
-    transform: rotate(360deg) scale(1);
+    transform: rotate(360deg) scale(0.95);
   }
 }
 
 @keyframes status-pulse {
   0%,
   100% {
-    transform: scale(0.85);
-    opacity: 0.5;
+    transform: scale(0.9);
+    opacity: 0.35;
   }
   50% {
-    transform: scale(1.1);
-    opacity: 0.9;
+    transform: scale(1.05);
+    opacity: 0.75;
+  }
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-60%);
+    opacity: 0.3;
+  }
+  50% {
+    transform: translateX(0%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(60%);
+    opacity: 0.3;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 100% 50%;
   }
 }
