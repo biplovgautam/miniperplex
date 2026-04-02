@@ -5,6 +5,7 @@ uvicorn==0.29.0
 
 langchain-core==0.1.45
 langchain-groq
+langchain-pinecone
 
 
 
@@ -17,3 +18,5 @@ pytest==8.2.0
 youtube-transcript-api
 yt-dlp
 requests
+pinecone
+psycopg[binary]

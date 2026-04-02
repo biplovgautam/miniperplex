@@ -1,70 +1,60 @@
 import json
+from typing import AsyncIterator
 
 from fastapi import HTTPException
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from app.agents.prompts import REWRITE_PROMPT, SYSTEM_PROMPT
+from app.agents.base_agent import BaseAgent
+from app.agents.metals_agent import MetalsAgent
+from app.agents.router import RouterAgent
 from app.core.config import settings
 from app.schemas.chat import ChatRequest
-from app.tools.custom_tools import tavily_search
+from app.tools.search_tool import TavilySearchTool
 
 
-def sse_event(event: str, data: str) -> str:
+def _sse_event(event: str, data: str) -> str:
     lines = data.splitlines() or [""]
     payload = "\n".join([f"data: {line}" for line in lines])
     return f"event: {event}\n{payload}\n\n"
 
 
 class AgentManager:
-    def get_llm(self) -> ChatGroq:
+    def __init__(self) -> None:
+        self.llm = self._build_llm(model=settings.groq_model, temperature=0.2)
+        self.router_llm = self._build_llm(model="llama3-8b-8192", temperature=0)
+        self.tools = {"search": TavilySearchTool()}
+        self.router = RouterAgent(self.router_llm)
+        self.agents: dict[str, BaseAgent] = {
+            "metals": MetalsAgent(self.tools, self.llm),
+        }
+
+    def _build_llm(self, model: str, temperature: float) -> ChatGroq:
         if not settings.groq_api_key:
             raise HTTPException(
                 status_code=503,
                 detail="GROQ_API_KEY is not set. Configure it in your .env file to enable Groq access.",
             )
         return ChatGroq(
-            model=settings.groq_model,
-            temperature=0.2,
+            model=model,
+            temperature=temperature,
             api_key=settings.groq_api_key,
         )
 
-    async def rewrite_query(self, llm: ChatGroq, request: ChatRequest) -> str:
-        history_text = "\n".join(
-            [f"{turn.role.title()}: {turn.content}" for turn in request.history[-6:]]
-        ).strip()
-        prompt_text = (
-            f"Conversation so far:\n{history_text}\n\nUser question: {request.message}"
-            if history_text
-            else f"User question: {request.message}"
-        )
-        try:
-            response = await llm.ainvoke(
-                [
-                    SystemMessage(content=REWRITE_PROMPT),
-                    HumanMessage(content=prompt_text),
-                ],
-                max_tokens=32,
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[str]:
+        agent_key = await self.router.route(request.message)
+        if agent_key != "metals":
+            notice = (
+                "This MVP currently supports metals analysis only. "
+                "Please ask a gold/silver question or include a metals ticker."
             )
-        except Exception:
-            return request.message
+            yield _sse_event("sources", json.dumps({"query": request.message, "sources": []}))
+            yield _sse_event("token", notice)
+            yield _sse_event("done", "")
+            return
 
-        rewritten = (response.content or "").strip().strip('"')
-        return rewritten or request.message
+        agent = self.agents.get("metals")
+        if agent is None:
+            agent = MetalsAgent(self.tools, self.llm)
 
-    async def stream_chat(self, request: ChatRequest):
-        llm = self.get_llm()
-        rewritten_query = await self.rewrite_query(llm, request)
-        _, tool_result, sources_payload = await tavily_search(rewritten_query)
-
-        messages = [
-            SystemMessage(content=SYSTEM_PROMPT),
-            SystemMessage(content=tool_result),
-            HumanMessage(content=request.message),
-        ]
-
-        yield sse_event("sources", json.dumps(sources_payload))
-        async for chunk in llm.astream(messages):
-            if chunk.content:
-                yield sse_event("token", chunk.content)
-        yield sse_event("done", "")
+        async for event in agent.run(query=request.message, history=request.history):
+            yield event

@@ -25,3 +25,51 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.status-pulse {
+  position: absolute;
+  height: 20px;
+  width: 20px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.08);
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+
+.status-orb {
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 90deg,
+    rgba(56, 189, 248, 0.9),
+    rgba(129, 140, 248, 0.9),
+    rgba(16, 185, 129, 0.9),
+    rgba(56, 189, 248, 0.9)
+  );
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+  animation: status-spin 2s linear infinite;
+}
+
+@keyframes status-spin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.9;
+  }
+}

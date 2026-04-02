@@ -2,7 +2,11 @@
 
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AnchorHTMLAttributes, ReactNode } from "react";
+import type {
+  AnchorHTMLAttributes,
+  KeyboardEvent,
+  ReactNode,
+} from "react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type SourceItem = {
@@ -19,22 +23,33 @@ type ChatMessage = {
   content: string;
   sources?: SourceItem[];
   query?: string;
+  status?: string;
 };
 
 const SSE_SEPARATOR = "\n\n";
 
-const buildSourceMap = (sources: SourceItem[] = []) =>
-  sources.reduce<Record<string, string>>((acc, source) => {
-    acc[String(source.index)] = source.url;
-    return acc;
-  }, {});
+const extractCitationIndexes = (body: string) => {
+  const seen = new Set<number>();
+  const ordered: number[] = [];
+  for (const match of body.matchAll(/\[(\d+)]/g)) {
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || seen.has(parsed)) {
+      continue;
+    }
+    seen.add(parsed);
+    ordered.push(parsed);
+  }
+  return ordered;
+};
 
-const injectCitationLinks = (body: string, sources: SourceItem[] = []) => {
-  const sourceMap = buildSourceMap(sources);
-  return body.replace(/\[(\d+)]/g, (match, index) => {
-    const url = sourceMap[index];
-    return url ? `[${index}](${url})` : match;
-  });
+const getCitedSources = (body: string, sources: SourceItem[] = []) => {
+  if (!body || sources.length === 0) {
+    return [];
+  }
+  const cited = new Set(extractCitationIndexes(body));
+  return sources
+    .filter((source) => cited.has(source.index))
+    .sort((first, second) => first.index - second.index);
 };
 
 const getSiteName = (url: string, fallback?: string) => {
@@ -50,7 +65,9 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isEmpty = messages.length === 0;
 
   const suggestions = [
@@ -83,28 +100,6 @@ export default function Home() {
       href,
       ...props
     }: AnchorHTMLAttributes<HTMLAnchorElement> & { children?: ReactNode }) => {
-      const childText =
-        typeof children === "string"
-          ? children
-          : Array.isArray(children) && typeof children[0] === "string"
-            ? children[0]
-            : "";
-      const isCitation = /^\d+$/.test(childText);
-      if (isCitation) {
-        return (
-          <sup className="mx-0.5 align-super">
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700 transition hover:bg-gray-300"
-              {...props}
-            >
-              {childText}
-            </a>
-          </sup>
-        );
-      }
       return (
         <a
           href={href}
@@ -125,13 +120,39 @@ export default function Home() {
     setIsStreaming(false);
   };
 
-  const applySuggestion = (prompt: string) => {
-    setInput(prompt);
+  const focusComposer = () => {
     requestAnimationFrame(() => {
-      textareaRef.current?.focus();
+      const element = textareaRef.current;
+      if (!element) {
+        return;
+      }
+      element.focus();
+      const caret = element.value.length;
+      element.setSelectionRange(caret, caret);
     });
   };
 
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+    });
+  };
+
+  const applySuggestion = (prompt: string) => {
+    setInput(prompt);
+    focusComposer();
+  };
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    if (isStreaming || !event.currentTarget.value.trim()) {
+      return;
+    }
+    formRef.current?.requestSubmit();
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -147,6 +168,7 @@ export default function Home() {
 
     setInput("");
     setIsStreaming(true);
+    focusComposer();
 
     const assistantIndex = messages.length + 1;
     setMessages((prev) => [
@@ -213,6 +235,18 @@ export default function Home() {
           return;
         }
 
+        if (eventType === "status") {
+          if (!data) {
+            return;
+          }
+          setMessages((prev) =>
+            prev.map((message, index) =>
+              index === assistantIndex ? { ...message, status: data } : message
+            )
+          );
+          return;
+        }
+
         if (eventType === "token") {
           if (!data) {
             return;
@@ -224,6 +258,16 @@ export default function Home() {
                 : message
             )
           );
+          return;
+        }
+
+        if (eventType === "done") {
+          setMessages((prev) =>
+            prev.map((message, index) =>
+              index === assistantIndex ? { ...message, status: undefined } : message
+            )
+          );
+          return;
         }
       };
 
@@ -249,11 +293,13 @@ export default function Home() {
       );
     } finally {
       setIsStreaming(false);
+      focusComposer();
     }
   };
 
   const inputForm = (
     <form
+      ref={formRef}
       onSubmit={handleSubmit}
       className="w-full rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
     >
@@ -265,6 +311,7 @@ export default function Home() {
           value={input}
           rows={1}
           onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleComposerKeyDown}
         />
         <div className="flex flex-col gap-2 text-xs text-gray-400 sm:flex-row sm:items-center sm:justify-between">
           {isEmpty ? (
@@ -303,6 +350,17 @@ export default function Home() {
     const next = Math.min(element.scrollHeight, 220);
     element.style.height = `${next}px`;
   }, [input]);
+
+  useEffect(() => {
+    focusComposer();
+  }, []);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    scrollToBottom(isStreaming ? "auto" : "smooth");
+  }, [isStreaming, messages]);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -364,71 +422,97 @@ export default function Home() {
                   >
                     {message.role === "assistant" ? (
                       <div className="flex flex-col gap-4">
-                        {message.sources && message.sources.length > 0 && (
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                            {message.sources.map((source) => {
-                              const siteName = getSiteName(
-                                source.url,
-                                source.site
-                              );
-                              return (
-                                <a
-                                  key={`${source.index}-${source.url}`}
-                                  href={source.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 text-left text-xs text-gray-600 shadow-sm transition hover:-translate-y-0.5 hover:border-gray-300 hover:bg-gray-50"
-                                >
-                                  <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-500">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img
-                                      src={
-                                        source.favicon ||
-                                        `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
-                                          siteName
-                                        )}&sz=32`
-                                      }
-                                      alt={siteName}
-                                      className="h-4 w-4"
-                                    />
-                                    <span className="truncate">{siteName}</span>
-                                  </div>
-                                  <span
-                                    className="truncate text-xs font-semibold text-gray-900"
-                                    title={source.title}
-                                  >
-                                    {source.title}
-                                  </span>
-                                  {source.snippet && (
-                                    <span className="max-h-10 overflow-hidden text-[11px] text-gray-500">
-                                      {source.snippet}
-                                    </span>
-                                  )}
-                                </a>
-                              );
-                            })}
+                        {isStreaming && message.content.length === 0 && (
+                          <div className="flex items-center gap-2 rounded-full border border-white/60 bg-white/70 px-3 py-1.5 text-[11px] text-gray-500 shadow-sm backdrop-blur">
+                            <span className="relative flex h-5 w-5 items-center justify-center">
+                              <span className="status-pulse" />
+                              <span className="status-orb" />
+                            </span>
+                            <span className="truncate text-gray-500/80">
+                              {message.status ?? "Thinking..."}
+                            </span>
                           </div>
                         )}
 
-                        {isStreaming &&
-                          message.content.length === 0 &&
-                          (!message.sources || message.sources.length === 0) && (
-                            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                              Searching the web for &ldquo;{message.query ?? "your query"}&rdquo;...
-                            </div>
-                          )}
+                        
 
                         {message.content && (
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            className="prose prose-sm max-w-none whitespace-pre-wrap break-words text-gray-900"
-                            components={markdownComponents}
-                          >
-                            {injectCitationLinks(
-                              message.content,
-                              message.sources
-                            )}
-                          </ReactMarkdown>
+                          <>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              className="prose prose-sm max-w-none whitespace-pre-wrap break-words text-gray-900"
+                              components={markdownComponents}
+                            >
+                              {message.content}
+                            </ReactMarkdown>
+
+                            {(() => {
+                              const citedSources = getCitedSources(
+                                message.content,
+                                message.sources
+                              );
+                              if (citedSources.length === 0) {
+                                return null;
+                              }
+                              return (
+                                <details className="group rounded-xl border border-gray-200 bg-gray-50/70 p-2">
+                                  <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-2 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100">
+                                    <span>Sources ({citedSources.length})</span>
+                                    <span className="text-[10px] text-gray-500 group-open:hidden">
+                                      Show
+                                    </span>
+                                    <span className="hidden text-[10px] text-gray-500 group-open:inline">
+                                      Hide
+                                    </span>
+                                  </summary>
+
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    {citedSources.map((source) => {
+                                      const siteName = getSiteName(
+                                        source.url,
+                                        source.site
+                                      );
+                                      return (
+                                        <a
+                                          key={`${source.index}-${source.url}`}
+                                          href={source.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="flex items-start gap-2 rounded-lg border border-gray-200 bg-white px-2.5 py-2 text-left transition hover:border-gray-300 hover:bg-gray-50"
+                                        >
+                                          <span className="mt-[1px] inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gray-900 px-1 text-[10px] font-semibold text-white">
+                                            {source.index}
+                                          </span>
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={
+                                              source.favicon ||
+                                              `https://www.google.com/s2/favicons?domain=${encodeURIComponent(
+                                                siteName
+                                              )}&sz=32`
+                                            }
+                                            alt={siteName}
+                                            className="mt-[2px] h-4 w-4"
+                                          />
+                                          <span className="min-w-0 flex-1">
+                                            <span
+                                              className="block truncate text-xs font-semibold text-gray-800"
+                                              title={source.title}
+                                            >
+                                              {source.title}
+                                            </span>
+                                            <span className="block truncate text-[11px] text-gray-500">
+                                              {siteName}
+                                            </span>
+                                          </span>
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                </details>
+                              );
+                            })()}
+                          </>
                         )}
                       </div>
                     ) : (
@@ -439,6 +523,7 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+              <div ref={messagesEndRef} aria-hidden className="h-px w-full" />
             </div>
           )}
         </section>
